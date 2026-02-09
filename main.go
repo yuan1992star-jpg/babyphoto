@@ -155,7 +155,7 @@ func main() {
 	r := gin.Default()
 
 	// 允许上传的最大内存
-	r.MaxMultipartMemory = 32 << 20 // 32 MiB
+	r.MaxMultipartMemory = 2 << 30 // 2 GiB
 
 	// 基础目录
 	baseDir := "./public/babyphoto"
