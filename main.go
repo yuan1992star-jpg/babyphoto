@@ -84,7 +84,7 @@ func getShootingDate(file io.Reader) time.Time {
 	return time.Time{}
 }
 
-// 在整个目录中查找是否存在相同哈希值的文件
+// 文件名格式为 日期_hash.ext（如 20060102_a1b2c3d4...jpg），检查是否存在相同 hash 的文件
 func findDuplicateFile(baseDir, fileHash, ext string) (string, bool) {
 	var foundPath string
 	filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
@@ -92,16 +92,15 @@ func findDuplicateFile(baseDir, fileHash, ext string) (string, bool) {
 			return nil
 		}
 		if info.IsDir() {
-			// 跳过重复文件目录
 			if strings.Contains(path, "_duplicates") {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		// 检查文件名是否以相同的哈希值开头
-		if strings.HasPrefix(info.Name(), fileHash) {
+		baseName := strings.TrimSuffix(info.Name(), ext)
+		if baseName != info.Name() && strings.HasSuffix(baseName, "_"+fileHash) {
 			foundPath = path
-			return filepath.SkipAll // 找到后停止搜索
+			return filepath.SkipAll
 		}
 		return nil
 	})
@@ -111,26 +110,26 @@ func findDuplicateFile(baseDir, fileHash, ext string) (string, bool) {
 // 读取出生日期配置
 func loadBabyConfig(configPath string) (*BabyConfig, error) {
 	config := &BabyConfig{}
-	
+
 	// 如果文件不存在，返回空配置
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return config, nil
 	}
-	
+
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if len(data) == 0 {
 		return config, nil
 	}
-	
+
 	err = json.Unmarshal(data, config)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return config, nil
 }
 
@@ -140,7 +139,7 @@ func saveBabyConfig(configPath string, config *BabyConfig) error {
 	if err != nil {
 		return err
 	}
-	
+
 	return os.WriteFile(configPath, data, 0644)
 }
 
@@ -200,15 +199,15 @@ func main() {
 			}
 			fileHash := fmt.Sprintf("%x", hash.Sum(nil))
 			ext := strings.ToLower(filepath.Ext(file.Filename))
-			newFileName := fileHash + ext
-
-			// 3. 确定存储路径：优先使用拍摄日期
+			// 3. 确定日期：优先拍摄日期(EXIF)，否则用当前时间作为“修改日期”的近似
 			var targetDate time.Time
 			if !shootingDate.IsZero() {
 				targetDate = shootingDate
 			} else {
 				targetDate = time.Now()
 			}
+			// 命名：拍摄日期(或修改日期) + hash，如 20060102_a1b2c3d4e5f6....jpg
+			newFileName := targetDate.Format("20060102") + "_" + fileHash + ext
 
 			datePath := filepath.Join(targetDate.Format("2006"), targetDate.Format("01"), targetDate.Format("02"))
 			uploadDir := filepath.Join(baseDir, datePath)
@@ -226,7 +225,7 @@ func main() {
 			// 4. 检查文件是否已存在（先检查当前目录，再全局搜索）
 			isDuplicate := false
 			duplicateDir := filepath.Join(baseDir, "_duplicates")
-			
+
 			// 先检查当前日期目录
 			if _, err := os.Stat(dstPath); err == nil {
 				isDuplicate = true
@@ -243,10 +242,9 @@ func main() {
 					continue
 				}
 
-				// 使用原始文件名+时间戳+哈希值命名，避免文件名冲突
+				// 重复文件：日期_时间戳_hash.ext，避免覆盖且可追溯
 				timestamp := time.Now().Format("20060102_150405")
-				baseName := strings.TrimSuffix(file.Filename, ext)
-				duplicateFileName := fmt.Sprintf("%s_%s_%s%s", baseName, timestamp, fileHash[:8], ext)
+				duplicateFileName := fmt.Sprintf("%s_%s_%s%s", targetDate.Format("20060102"), timestamp, fileHash, ext)
 				duplicatePath := filepath.Join(duplicateDir, duplicateFileName)
 				duplicateURL := "/public/babyphoto/_duplicates/" + duplicateFileName
 
@@ -390,12 +388,12 @@ func main() {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取配置失败: " + err.Error()})
 			return
 		}
-		
+
 		if config.BirthDate == "" {
 			c.JSON(http.StatusOK, gin.H{"birthDate": ""})
 			return
 		}
-		
+
 		c.JSON(http.StatusOK, gin.H{"birthDate": config.BirthDate})
 	})
 
@@ -404,28 +402,28 @@ func main() {
 		var req struct {
 			BirthDate string `json:"birthDate" binding:"required"`
 		}
-		
+
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
 			return
 		}
-		
+
 		// 验证日期格式
 		_, err := time.Parse("2006-01-02", req.BirthDate)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "日期格式错误，应为 YYYY-MM-DD"})
 			return
 		}
-		
+
 		config := &BabyConfig{
 			BirthDate: req.BirthDate,
 		}
-		
+
 		if err := saveBabyConfig(configPath, config); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存配置失败: " + err.Error()})
 			return
 		}
-		
+
 		c.JSON(http.StatusOK, gin.H{"message": "保存成功", "birthDate": req.BirthDate})
 	})
 
@@ -450,4 +448,3 @@ func main() {
 
 	r.Run(fmt.Sprintf(":%d", port))
 }
-
