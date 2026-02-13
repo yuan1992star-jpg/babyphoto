@@ -198,6 +198,8 @@
 
                 <div v-else class="space-y-16 pl-4 md:pl-10 relative">
                     <div class="timeline-line hidden md:block"></div>
+
+                    <div :style="{ height: topSpacerHeight + 'px' }"></div>
                     
                     <div v-for="group in visibleGroups" :key="group.date" :id="'group-'+group.date" :data-date="group.date" class="relative timeline-dot">
                         <div class="mb-8">
@@ -258,18 +260,7 @@
                     </div>
 
                     <!-- 加载更多指示器 -->
-                    <div v-if="visibleCount < (groups?.length ?? 0)" class="mt-8 flex justify-center">
-                        <button 
-                            @click="loadMore" 
-                            :disabled="isLoadingMore"
-                            class="px-6 py-3 bg-gradient-to-r from-pink-500 to-rose-500 text-white font-bold rounded-full shadow-lg shadow-pink-200 hover:shadow-pink-300 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2">
-                            <span v-if="!isLoadingMore">加载更多回忆 ({{ (groups?.length ?? 0) - visibleCount }} 个日期)</span>
-                            <span v-else class="flex items-center space-x-2">
-                                <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                <span>加载中...</span>
-                            </span>
-                        </button>
-                    </div>
+                    <div :style="{ height: bottomSpacerHeight + 'px' }"></div>
                 </div>
             </div>
 
@@ -405,10 +396,67 @@
                 const birthDateInput = ref('');
                 const birthDate = ref(null);
                 const todayDate = new Date().toISOString().split('T')[0];
-                const visibleCount = ref(10); // 初始显示10个日期分组
+                const startIndex = ref(0);
+                const endIndex = ref(10);
+                const groupHeights = {}; // 记录每个日期分组的实际高度
+                const topSpacerHeight = ref(0);
+                const bottomSpacerHeight = ref(0);
                 const isLoadingMore = ref(false);
                 let dragCounter = 0;
                 let observer = null;
+
+                const updateVisibleRange = () => {
+                    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+                    const screenHeight = window.innerHeight;
+                    const buffer = 800; // 缓冲区高度
+
+                    let currentOffset = 0;
+                    let newStart = -1;
+                    let newEnd = groups.value.length;
+
+                    // 预估高度，如果没记录过高度则用平均高度 400px
+                    const getGroupHeight = (date) => groupHeights[date] || 400;
+
+                    for (let i = 0; i < groups.value.length; i++) {
+                        const h = getGroupHeight(groups.value[i].date);
+                        if (newStart === -1 && currentOffset + h > scrollTop - buffer) {
+                            newStart = i;
+                        }
+                        if (currentOffset > scrollTop + screenHeight + buffer) {
+                            newEnd = i;
+                            break;
+                        }
+                        currentOffset += h;
+                    }
+
+                    startIndex.value = Math.max(0, newStart);
+                    endIndex.value = Math.min(groups.value.length, newEnd + 2); // 多预留两组
+
+                    // 计算 Spacer
+                    let topH = 0;
+                    for (let i = 0; i < startIndex.value; i++) {
+                        topH += getGroupHeight(groups.value[i].date);
+                    }
+                    topSpacerHeight.value = topH;
+
+                    let bottomH = 0;
+                    for (let i = endIndex.value; i < groups.value.length; i++) {
+                        bottomH += getGroupHeight(groups.value[i].date);
+                    }
+                    bottomSpacerHeight.value = bottomH;
+                };
+
+                // 记录 DOM 高度
+                const observeHeights = () => {
+                    nextTick(() => {
+                        groups.value.slice(startIndex.value, endIndex.value).forEach(group => {
+                            const el = document.getElementById('group-' + group.date);
+                            if (el) {
+                                groupHeights[group.date] = el.offsetHeight + 64; // 64 是 space-y-16 的间距
+                            }
+                        });
+                    });
+                };
 
                 const initObserver = () => {
                     if (observer) observer.disconnect();
@@ -490,7 +538,10 @@
                         const res = await fetch('/api/photos');
                         const data = await res.json();
                         groups.value = data.map(g => ({ ...g, expanded: false, photos: null, loadingPhotos: false }));
-                        visibleCount.value = 10;
+                        startIndex.value = 0;
+                        endIndex.value = Math.min(10, groups.value.length);
+                        topSpacerHeight.value = 0;
+                        bottomSpacerHeight.value = 0;
                         
                         // 自动加载首屏前 5 个分组的照片
                         for (let i = 0; i < Math.min(groups.value.length, 5); i++) {
@@ -529,57 +580,30 @@
 
                 // 计算可见的分组
                 const visibleGroups = Vue.computed(() => {
-                    return groups.value.slice(0, visibleCount.value);
+                    return groups.value.slice(startIndex.value, endIndex.value);
                 });
 
                 const ensureGroupVisibleAndScroll = async (date) => {
                     const targetIndex = groups.value.findIndex(g => g.date === date);
-                    if (targetIndex === -1) {
-                        return;
+                    if (targetIndex === -1) return;
+
+                    let targetOffset = 0;
+                    for (let i = 0; i < targetIndex; i++) {
+                        targetOffset += (groupHeights[groups.value[i].date] || 400);
                     }
 
-                    // 如果目标分组不在已渲染范围内，先扩大可见范围
-                    if (targetIndex >= visibleCount.value) {
-                        visibleCount.value = Math.min(targetIndex + 1, groups.value.length);
-                        await nextTick();
-                        await new Promise(r => setTimeout(r, 30));
-                    }
-
-                    const group = groups.value[targetIndex];
-                    await ensureGroupPhotosLoaded(group);
-
-                    const el = document.getElementById('group-' + date);
-                    if (el) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
+                    window.scrollTo({ top: targetOffset, behavior: 'smooth' });
                 };
 
-                // 加载更多分组
-                const loadMore = () => {
-                    if (isLoadingMore.value || visibleCount.value >= groups.value.length) {
-                        return;
-                    }
-                    isLoadingMore.value = true;
-                    setTimeout(() => {
-                        visibleCount.value = Math.min(visibleCount.value + 10, groups.value.length);
-                        isLoadingMore.value = false;
-                        initObserver();
-                        setTimeout(() => lucide.createIcons(), 50);
-                    }, 200);
-                };
-
-                // 滚动监听
+                // 滚动监听：核心驱动虚拟列表窗口
+                let scrollRaf = 0;
                 const handleScroll = () => {
-                    if (isLoadingMore.value || visibleCount.value >= groups.value.length) {
-                        return;
-                    }
-                    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-                    const windowHeight = window.innerHeight;
-                    const documentHeight = document.documentElement.scrollHeight;
-                    // 当滚动到距离底部200px时加载更多
-                    if (scrollTop + windowHeight >= documentHeight - 200) {
-                        loadMore();
-                    }
+                    if (scrollRaf) cancelAnimationFrame(scrollRaf);
+                    scrollRaf = requestAnimationFrame(() => {
+                        updateVisibleRange();
+                        observeHeights();
+                        initObserver();
+                    });
                 };
 
                 const formatDisplayDate = (dateStr) => {
@@ -883,7 +907,7 @@
                 return {
                     groups, activeTab, pendingFiles, loading, showUpload, isDragging, isGlobalDragging, uploadingFiles, lightbox,
                     showBirthDateModal, birthDateInput, birthDate, todayDate,
-                    visibleCount, isLoadingMore, visibleGroups, loadMore,
+                    startIndex, endIndex, topSpacerHeight, bottomSpacerHeight, visibleGroups,
                     formatDisplayDate, getBabyAge, saveBirthDate, loadBirthDate,
                     handleFileSelect, onDragOver, onDragLeave, onDrop,
                     openLightbox, closeLightbox, scrollToGroup, toggleExpand,
@@ -906,3 +930,4 @@
     </style>
 </body>
 </html>
+
