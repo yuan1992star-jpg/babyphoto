@@ -67,6 +67,17 @@
 <body class="text-slate-700">
     <div id="app" v-cloak class="flex flex-col md:flex-row min-h-screen">
         
+        <transition name="toast">
+            <div v-if="toast.show" id="toast-container" class="fixed top-8 left-1/2 -translate-x-1/2 z-[3000] min-w-[300px] max-w-md pointer-events-none">
+                <div class="glass-morphism px-6 py-4 rounded-2xl shadow-2xl border border-white/50 flex items-center space-x-3 pointer-events-auto">
+                    <div :class="toast.type === 'error' ? 'bg-rose-100 text-rose-500' : 'bg-pink-100 text-pink-500'" class="p-2 rounded-full">
+                        <i :data-lucide="toast.type === 'error' ? 'alert-circle' : 'sparkles'" class="w-5 h-5 toast-icon"></i>
+                    </div>
+                    <p class="text-slate-700 font-medium">{{ toast.message }}</p>
+                </div>
+            </div>
+        </transition>
+
         <!-- Global Drag Overlay -->
         <div v-if="isGlobalDragging" class="fixed inset-0 z-[100] bg-pink-400/80 backdrop-blur-md flex flex-col items-center justify-center text-white p-8 pointer-events-none transition-all">
             <div class="border-4 border-dashed border-white/50 rounded-3xl w-full h-full flex flex-col items-center justify-center animate-pulse">
@@ -106,8 +117,72 @@
                 </div>
 
                 <template v-if="activeTab === 'gallery'">
-                    <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">时间航线</div>
-                    <div v-for="group in groups" :key="group.date" class="relative pl-6 py-2 cursor-pointer group" @click="scrollToGroup(group.date)">
+                    <div class="mb-8 px-1 relative">
+                        <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 px-1">快速穿越</div>
+                        
+                        <!-- 自定义日期选择器触发器 -->
+                        <div class="relative group">
+                            <div @click.stop="toggleCalendar($event)" class="bg-white/40 backdrop-blur-sm rounded-2xl p-1.5 border border-white/60 shadow-inner cursor-pointer transition-all hover:bg-white/60 flex items-center gap-1.5">
+                                <div class="flex items-center gap-2 flex-1 bg-white/80 rounded-xl px-3 py-2.5 border-2 border-transparent group-hover:border-pink-200 transition-all">
+                                    <i data-lucide="calendar-search" class="w-4 h-4 text-pink-400"></i>
+                                    <span class="text-sm font-medium text-slate-700">{{ searchDate ? formatDisplayDate(searchDate) : '选择纪念日...' }}</span>
+                                </div>
+                                <div class="shrink-0 p-2.5 bg-gradient-to-br from-pink-400 to-rose-500 text-white rounded-xl shadow-lg shadow-pink-200/50">
+                                    <i :data-lucide="showCalendar ? 'chevron-up' : 'calendar'" class="w-5 h-5"></i>
+                                </div>
+                            </div>
+
+                            <!-- 自定义日历弹出层 -->
+                            <transition name="calendar-pop">
+                                <div v-if="showCalendar" class="absolute top-full left-0 right-0 mt-3 z-[100] glass-morphism rounded-[2rem] shadow-2xl border border-white/80 p-5 overflow-hidden animate-in fade-in zoom-in duration-200">
+                                    <div class="flex items-center justify-between mb-4 px-2 gap-2">
+                                        <button @click.stop="prevMonth" class="p-2 hover:bg-pink-50 rounded-full text-slate-400 hover:text-pink-500 transition-colors shrink-0">
+                                            <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                                        </button>
+                                        
+                                        <!-- 手动输入年月 -->
+                                        <div class="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200 focus-within:border-pink-300 transition-all">
+                                            <input type="number" v-model.number="calendarYear" class="w-14 bg-transparent outline-none text-center text-sm font-bold text-slate-800 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" @click.stop @change="validateCalendarInput">
+                                            <span class="text-[10px] font-bold text-slate-500">年</span>
+                                            <input type="number" v-model.number="tempMonth" class="w-8 bg-transparent outline-none text-center text-sm font-bold text-slate-700 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" @click.stop @change="handleMonthInput">
+                                            <span class="text-[10px] font-bold text-slate-500">月</span>
+                                        </div>
+
+                                        <button @click.stop="nextMonth" class="p-2 hover:bg-pink-50 rounded-full text-slate-400 hover:text-pink-500 transition-colors shrink-0">
+                                            <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                                        </button>
+                                    </div>
+                                    
+                                    <div class="grid grid-cols-7 gap-1 mb-2">
+                                        <div v-for="day in ['日','一','二','三','四','五','六']" :key="day" class="text-[10px] font-bold text-slate-300 text-center py-1 uppercase">{{ day }}</div>
+                                    </div>
+
+                                    <div class="grid grid-cols-7 gap-1">
+                                        <div v-for="(date, index) in calendarDays" :key="index" 
+                                            @click.stop="selectCalendarDate(date)"
+                                            :class="[
+                                                'aspect-square flex items-center justify-center text-xs rounded-xl cursor-pointer transition-all relative group/date',
+                                                date.currentMonth ? 'text-slate-800 font-bold' : 'text-slate-400',
+                                                isToday(date) ? 'bg-pink-100 text-pink-700 font-black' : '',
+                                                isSelected(date) ? 'bg-gradient-to-br from-pink-500 to-rose-600 text-white shadow-md shadow-pink-300 scale-110 z-10' : 'hover:bg-pink-100 hover:text-pink-600',
+                                                hasPhotos(date) ? 'after:content-[\'\'] after:absolute after:bottom-1 after:w-1.5 after:h-1.5 after:bg-pink-600 after:rounded-full after:shadow-[0_0_4px_rgba(219,39,119,0.4)]' : ''
+                                            ]">
+                                            {{ date.day }}
+                                        </div>
+                                    </div>
+
+                                    <div class="mt-4 pt-4 border-t border-slate-200 flex items-center justify-between px-1">
+                                        <button @click.stop="selectToday" class="text-xs font-bold text-pink-600 hover:text-rose-700 transition-colors">今天</button>
+                                        <div v-if="searchDate" @click.stop="searchByDate" class="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-pink-600 cursor-pointer transition-colors group/go">
+                                            去看看 <i data-lucide="arrow-right" class="w-4 h-4 group-hover/go:translate-x-0.5 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </transition>
+                        </div>
+                    </div>
+                    <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 px-1">最近瞬间</div>
+                    <div v-for="group in groups" :key="group.date" class="relative pl-6 py-2.5 cursor-pointer group rounded-xl hover:bg-pink-50/50 transition-colors" @click="scrollToGroup(group.date)">
                         <div class="absolute left-1 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-pink-300 group-hover:scale-150 transition-transform"></div>
                         <div class="text-sm font-medium text-slate-600 group-hover:text-pink-500 transition-colors">{{ formatDisplayDate(group.date) }}</div>
                         <div class="text-[10px] text-slate-400">{{ group.count }} 枚回忆</div>
@@ -385,6 +460,166 @@
             setup() {
                 const groups = ref([]);
                 const activeTab = ref('gallery');
+                const searchDate = ref('');
+                const showCalendar = ref(false);
+                const calendarYear = ref(new Date().getFullYear());
+                const calendarMonth = ref(new Date().getMonth());
+                const tempMonth = computed({
+                    get: () => calendarMonth.value + 1,
+                    set: (val) => {
+                        if (val >= 1 && val <= 12) {
+                            calendarMonth.value = val - 1;
+                        }
+                    }
+                });
+
+                const validateCalendarInput = () => {
+                    if (!calendarYear.value || calendarYear.value < 1900) calendarYear.value = new Date().getFullYear();
+                    if (calendarYear.value > 2100) calendarYear.value = 2100;
+                };
+
+                const handleMonthInput = () => {
+                    if (!tempMonth.value || tempMonth.value < 1) calendarMonth.value = 0;
+                    else if (tempMonth.value > 12) calendarMonth.value = 11;
+                };
+
+                const toggleCalendar = (e) => {
+                    if (e) e.stopPropagation();
+                    showCalendar.value = !showCalendar.value;
+                    if (showCalendar.value) {
+                        if (searchDate.value) {
+                            const d = new Date(searchDate.value);
+                            if (!isNaN(d.getTime())) {
+                                calendarYear.value = d.getFullYear();
+                                calendarMonth.value = d.getMonth();
+                            }
+                        }
+                        nextTick(() => {
+                            const calendarEl = document.querySelector('.calendar-pop-enter-active, .glass-morphism');
+                            if (calendarEl) {
+                                lucide.createIcons({ root: calendarEl });
+                            } else {
+                                lucide.createIcons();
+                            }
+                        });
+                    }
+                };
+
+                const prevMonth = () => {
+                    if (calendarMonth.value === 0) {
+                        calendarMonth.value = 11;
+                        calendarYear.value--;
+                    } else {
+                        calendarMonth.value--;
+                    }
+                    nextTick(() => lucide.createIcons());
+                };
+
+                const nextMonth = () => {
+                    if (calendarMonth.value === 11) {
+                        calendarMonth.value = 0;
+                        calendarYear.value++;
+                    } else {
+                        calendarMonth.value++;
+                    }
+                    nextTick(() => lucide.createIcons());
+                };
+
+                const calendarDays = computed(() => {
+                    const year = calendarYear.value;
+                    const month = calendarMonth.value;
+                    const firstDay = new Date(year, month, 1).getDay();
+                    const daysInMonth = new Date(year, month + 1, 0).getDate();
+                    const prevMonthDays = new Date(year, month, 0).getDate();
+                    
+                    const days = [];
+                    // 上个月剩余天数
+                    for (let i = firstDay - 1; i >= 0; i--) {
+                        days.push({
+                            year: month === 0 ? year - 1 : year,
+                            month: month === 0 ? 11 : month - 1,
+                            day: prevMonthDays - i,
+                            currentMonth: false
+                        });
+                    }
+                    // 本月天数
+                    for (let i = 1; i <= daysInMonth; i++) {
+                        days.push({ year, month, day: i, currentMonth: true });
+                    }
+                    // 下个月开始天数
+                    const nextDays = 42 - days.length;
+                    for (let i = 1; i <= nextDays; i++) {
+                        days.push({
+                            year: month === 11 ? year + 1 : year,
+                            month: month === 11 ? 0 : month + 1,
+                            day: i,
+                            currentMonth: false
+                        });
+                    }
+                    return days;
+                });
+
+                const isToday = (date) => {
+                    const today = new Date();
+                    return date.year === today.getFullYear() && 
+                           date.month === today.getMonth() && 
+                           date.day === today.getDate();
+                };
+
+                const isSelected = (date) => {
+                    if (!searchDate.value) return false;
+                    const d = new Date(searchDate.value);
+                    return date.year === d.getFullYear() && 
+                           date.month === d.getMonth() && 
+                           date.day === d.getDate();
+                };
+
+                const hasPhotos = (date) => {
+                    const dateStr = `${date.year}-${String(date.month + 1).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`;
+                    return groups.value.some(g => g.date === dateStr);
+                };
+
+                const selectCalendarDate = (date) => {
+                    const dateStr = `${date.year}-${String(date.month + 1).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`;
+                    searchDate.value = dateStr;
+                    // 如果点击的是非本月日期，跳转月份
+                    if (!date.currentMonth) {
+                        calendarYear.value = date.year;
+                        calendarMonth.value = date.month;
+                    }
+                };
+
+                const selectToday = () => {
+                    const today = new Date();
+                    calendarYear.value = today.getFullYear();
+                    calendarMonth.value = today.getMonth();
+                    const dateStr = `${calendarYear.value}-${String(calendarMonth.value + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+                    searchDate.value = dateStr;
+                };
+
+                const toast = ref({ show: false, message: '', type: 'info' });
+                let toastTimer = null;
+
+                const showToast = (message, type = 'info', duration = 3000) => {
+                    if (toastTimer) clearTimeout(toastTimer);
+                    toast.value = { show: true, message, type };
+                    
+                    // 优化：仅针对 toast 容器内的图标进行渲染，避免全量重绘
+                    nextTick(() => {
+                        const container = document.getElementById('toast-container');
+                        if (container) {
+                            lucide.createIcons({
+                                attrs: { class: 'w-5 h-5' },
+                                nameAttr: 'data-lucide',
+                                root: container
+                            });
+                        }
+                    });
+
+                    toastTimer = setTimeout(() => {
+                        toast.value.show = false;
+                    }, duration);
+                };
                 const pendingFiles = ref([]);
                 const loading = ref(true);
                 const showUpload = ref(false);
@@ -501,10 +736,11 @@
                         });
                         if (res.ok) {
                             pendingFiles.value = pendingFiles.value.filter(f => f.hash !== file.hash);
+                            showToast('归档成功', 'success');
                             await fetchPhotosIndex();
                         } else {
                             const err = await res.json();
-                            alert(err.error || '归档失败');
+                            showToast(err.error || '归档失败', 'error');
                         }
                     } catch (e) {
                         console.error('归档失败', e);
@@ -872,6 +1108,26 @@
                     }
                 });
 
+                const searchByDate = async () => {
+                    if (!searchDate.value) {
+                        showToast('请选择要搜索的日期', 'error');
+                        return;
+                    }
+                    if (activeTab.value !== 'gallery') {
+                        activeTab.value = 'gallery';
+                        await nextTick();
+                    }
+
+                    const date = searchDate.value;
+                    const exists = groups.value.some(g => g.date === date);
+                    if (!exists) {
+                        showToast('没有找到 ' + formatDisplayDate(date) + ' 的回忆', 'error');
+                        return;
+                    }
+
+                    await ensureGroupVisibleAndScroll(date);
+                };
+
                 const scrollToGroup = (id) => {
                     ensureGroupVisibleAndScroll(id);
                 };
@@ -897,6 +1153,15 @@
                     lucide.createIcons();
                     // 添加滚动监听
                     window.addEventListener('scroll', handleScroll);
+                    // 点击外部关闭日历
+                    window.addEventListener('click', (e) => {
+                        if (showCalendar.value) {
+                            const calendarEl = document.querySelector('.group.relative'); // 包含触发器和弹出层的父级
+                            if (calendarEl && !calendarEl.contains(e.target)) {
+                                showCalendar.value = false;
+                            }
+                        }
+                    });
                 });
 
                 // 组件卸载时移除滚动监听
@@ -905,9 +1170,15 @@
                 });
 
                 return {
+                    toast,
                     groups, activeTab, pendingFiles, loading, showUpload, isDragging, isGlobalDragging, uploadingFiles, lightbox,
                     showBirthDateModal, birthDateInput, birthDate, todayDate,
                     startIndex, endIndex, topSpacerHeight, bottomSpacerHeight, visibleGroups,
+                    searchDate, searchByDate,
+                    showCalendar, calendarYear, calendarMonth, tempMonth, toggleCalendar,
+                    validateCalendarInput, handleMonthInput,
+                    prevMonth, nextMonth, calendarDays, isToday, isSelected, hasPhotos,
+                    selectCalendarDate, selectToday,
                     formatDisplayDate, getBabyAge, saveBirthDate, loadBirthDate,
                     handleFileSelect, onDragOver, onDragLeave, onDrop,
                     openLightbox, closeLightbox, scrollToGroup, toggleExpand,
@@ -923,6 +1194,13 @@
         
         .zoom-enter-active, .zoom-leave-active { transition: all 0.3s ease; }
         .zoom-enter-from, .zoom-leave-to { opacity: 0; transform: scale(0.9); }
+
+        .toast-enter-active, .toast-leave-active { transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .toast-enter-from, .toast-leave-to { opacity: 0; transform: translate(-50%, -40px); }
+
+        .calendar-pop-enter-active, .calendar-pop-leave-active { transition: all 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28); }
+        .calendar-pop-enter-from { opacity: 0; transform: translateY(-10px) scale(0.95); }
+        .calendar-pop-leave-to { opacity: 0; transform: translateY(-10px) scale(0.95); }
 
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
